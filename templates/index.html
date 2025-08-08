@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Study Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <div class="header-content">
+                <h1><i class="fas fa-robot"></i> AI Study Assistant</h1>
+                <p>Get instant answers in multiple languages</p>
+                <div class="supported-langs">
+                    <span class="lang-tag">English</span>
+                    <span class="lang-tag">Urdu</span>
+                    <span class="lang-tag">Arabic</span>
+                    <span class="lang-tag">Turkish</span>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <form id="question-form">
+                <div class="input-group">
+                    <textarea name="question" placeholder="Type your question here... (e.g., What is photosynthesis?)" required></textarea>
+                    <div class="controls">
+                        <select name="language" id="language-select">
+                            <option value="en">English</option>
+                            <option value="ur">Urdu</option>
+                            <option value="ar">Arabic</option>
+                            <option value="tr">Turkish</option>
+                        </select>
+                        <button type="submit">
+                            <i class="fas fa-paper-plane"></i> Get Answer
+                        </button>
+                    </div>
+                </div>
+            </form>
+
+            <div id="result-container">
+                <div class="loader hidden" id="loader">
+                    <div class="spinner"></div>
+                    <p>Generating your answer...</p>
+                </div>
+                <div id="answer-box" class="hidden"></div>
+                <div id="error-box" class="hidden"></div>
+            </div>
+        </main>
+        
+        <footer>
+            <p>Text-to-speech optimized for Chrome browser • Clear female voices • Adjustable speed</p>
+        </footer>
+    </div>
+
+    <script>
+        // Speech synthesis state
+        let audioPlayer = null;
+
+        let isSpeaking = false;
+        let speechRate = 0.9; // Default speech rate (0.8-1.0 is good for comprehension)
+        
+        // Preferable female voice names by language
+        const femaleVoices = {
+            en: ["Samantha", "Karen", "Fiona", "Moira", "Tessa", "Veena"],
+            ur: ["Zeina", "Laila"],
+            ar: ["Amira", "Zeina", "Mai"],
+            tr: ["Yelda", "Filiz"]
+        };
+        
+        document.getElementById('question-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const form = e.target;
+            const loader = document.getElementById('loader');
+            const answerBox = document.getElementById('answer-box');
+            const errorBox = document.getElementById('error-box');
+            
+            // Reset UI
+            answerBox.classList.add('hidden');
+            errorBox.classList.add('hidden');
+            loader.classList.remove('hidden');
+            answerBox.innerHTML = '';
+            errorBox.textContent = '';
+            
+            // Stop any ongoing speech
+            if (isSpeaking) {
+                window.speechSynthesis.cancel();
+                isSpeaking = false;
+            }
+            
+            try {
+                const formData = new FormData(form);
+                const response = await fetch('/', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Get the selected language
+                const langSelect = document.getElementById('language-select');
+                const targetLang = langSelect.value;
+                
+                // Display answer with speak button
+                answerBox.innerHTML = `
+                    <div class="answer-header">
+                        <h3><i class="fas fa-lightbulb"></i> Answer (${data.time}s)</h3>
+                        <button id="speak-button" class="speak-btn" title="Read answer aloud">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
+                    </div>
+                    <div class="answer-content">${data.answer.replace(/\n/g, '<br>')}</div>
+                    <div class="answer-meta">
+                        <div class="answer-length">${data.answer.length} characters</div>
+                        <div class="voice-controls">
+                            <span><i class="fas fa-tachometer-alt"></i> Speed:</span>
+                            <div class="voice-slider">
+                                <input type="range" min="5" max="15" value="${speechRate * 10}" id="speech-rate">
+                                <span id="rate-value">${speechRate.toFixed(1)}x</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                answerBox.classList.remove('hidden');
+                
+                // Store answer text and language for speech synthesis
+                answerBox.dataset.answerText = data.answer;
+                answerBox.dataset.answerLang = targetLang;
+                
+            } catch (error) {
+                errorBox.textContent = error.message || "An error occurred. Please try again.";
+                errorBox.classList.remove('hidden');
+            } finally {
+                loader.classList.add('hidden');
+            }
+        });
+
+        // Add event listeners
+        document.addEventListener('click', function(e) {
+            const button = e.target.closest('#speak-button');
+            if (button) {
+                const answerBox = document.getElementById('answer-box');
+                const text = answerBox.dataset.answerText;
+                const langCode = answerBox.dataset.answerLang;
+                
+                speakText(text, langCode, button);
+            }
+        });
+        
+        // Speech rate control
+        document.addEventListener('input', function(e) {
+            if (e.target && e.target.id === 'speech-rate') {
+                speechRate = e.target.value / 10;
+                document.getElementById('rate-value').textContent = speechRate.toFixed(1) + 'x';
+            }
+        });
+
+        // Enhanced text-to-speech function
+
+function speakText(text, langCode, button) {
+    // Stop current audio if playing
+    if (isSpeaking) {
+        if (audioPlayer) {
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+            audioPlayer = null;
+        } else {
+            window.speechSynthesis.cancel();
+        }
+        isSpeaking = false;
+        button.innerHTML = '<i class="fas fa-volume-up"></i>';
+        button.classList.remove('speaking');
+        return;
+    }
+
+    // English = browser TTS
+    if (langCode === 'en') {
+        browserSpeak(text, langCode, button);
+        return;
+    }
+
+    // Urdu, Arabic, Turkish = ElevenLabs
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    button.classList.add('speaking');
+    isSpeaking = true;
+
+    fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text, lang: langCode })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.error) {
+            alert('TTS Error: ' + data.error);
+            resetAudioState(button);
+            return;
+        }
+
+        const audioSrc = 'data:audio/mpeg;base64,' + data.audio_base64;
+        audioPlayer = new Audio(audioSrc);
+
+        audioPlayer.onended = () => resetAudioState(button);
+        audioPlayer.onerror = () => {
+            alert('Could not play audio.');
+            resetAudioState(button);
+        };
+
+        audioPlayer.play();
+    })
+    .catch(err => {
+        alert('TTS Error: ' + err.message);
+        resetAudioState(button);
+    });
+}
+
+function resetAudioState(button) {
+    isSpeaking = false;
+    button.innerHTML = '<i class="fas fa-volume-up"></i>';
+    button.classList.remove('speaking');
+    audioPlayer = null;
+}
+
+// Helper for browser TTS (for English/Turkish)
+function browserSpeak(text, langCode, button) {
+    if (!('speechSynthesis' in window)) {
+        alert('Text-to-speech is not supported in your browser. Please use Chrome for best results.');
+        return;
+    }
+    if (isSpeaking) {
+        window.speechSynthesis.cancel();
+        isSpeaking = false;
+        button.innerHTML = '<i class="fas fa-volume-up"></i>';
+        button.classList.remove('speaking');
+        return;
+    }
+    const voices = window.speechSynthesis.getVoices();
+    let voice = findFemaleVoice(voices, langCode);
+    if (!voice) voice = voices.find(v => v.lang.startsWith(langCode));
+    if (!voice) voice = findFemaleVoice(voices, 'en');
+    if (!voice) {
+        alert('No suitable voice available for this language');
+        return;
+    }
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.voice = voice;
+    utterance.rate = speechRate;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    utterance.lang = langCode;
+    button.innerHTML = '<i class="fas fa-stop"></i>';
+    button.classList.add('speaking');
+    isSpeaking = true;
+    utterance.onend = function() {
+        button.innerHTML = '<i class="fas fa-volume-up"></i>';
+        button.classList.remove('speaking');
+        isSpeaking = false;
+    };
+    utterance.onerror = function(e) {
+        button.innerHTML = '<i class="fas fa-volume-up"></i>';
+        button.classList.remove('speaking');
+        isSpeaking = false;
+        alert('Could not read the answer. Please try again or use Chrome browser.');
+    };
+    window.speechSynthesis.speak(utterance);
+}
+ 
+        // Function to find a female voice for a language
+        function findFemaleVoice(voices, langCode) {
+            const preferredNames = femaleVoices[langCode] || [];
+            
+            // First try preferred names
+            for (const name of preferredNames) {
+                const voice = voices.find(v => v.name.includes(name));
+                if (voice) return voice;
+            }
+            
+            // Then try to find any female voice for the language
+            return voices.find(v => 
+                v.lang.startsWith(langCode) && 
+                (v.name.toLowerCase().includes('female') || 
+                 v.name.toLowerCase().includes('woman') || 
+                 v.name.toLowerCase().includes('lady'))
+            );
+        }
+        
+        // Initialize voices
+        window.speechSynthesis.onvoiceschanged = function() {
+            // Voices are now loaded
+            console.log('Voices loaded:', window.speechSynthesis.getVoices().length);
+        };
+    </script>
+</body>
+</html>
