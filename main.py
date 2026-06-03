@@ -8,6 +8,9 @@ import time
 import re
 import base64
 import requests
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 # Load environment variables from .env file (like GEMINI_API_KEY)
 load_dotenv()
@@ -21,7 +24,7 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 # Initialize the Gemini model
 model = genai.GenerativeModel(
-    "gemini-1.5-flash",  # Model name
+    "gemini-2.5-flash",  # Model name
     generation_config={
         "temperature": 0.9,         # Creativity level (higher = more creative)
         "max_output_tokens": 2048   # Max words/tokens in the response
@@ -29,7 +32,8 @@ model = genai.GenerativeModel(
 )
 
 # ElevenLabs API key for text-to-speech
-ELEVENLABS_API_KEY = 'sk_87b20b619fb87a0890d68f6f483cb72aa81938694ee28e50'
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+
 
 # Supported languages and their voice options
 SUPPORTED_LANGUAGES = {
@@ -55,7 +59,10 @@ def clean_response(text):
 # API endpoint for Text-to-Speech using ElevenLabs
 @app.route("/api/tts", methods=["POST"])
 def tts():
-    data = request.get_json()  # Get JSON data sent by frontend
+    data = request.get_json(silent=True)
+
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
     text = data.get("text")    # Extract text to convert
     lang = data.get("lang")    # Extract language for voice
 
@@ -84,7 +91,12 @@ def tts():
 
     # Send request to ElevenLabs and handle response
     try:
-        resp = requests.post(url, json=payload, headers=headers)
+        resp = requests.post(
+        url,
+        json=payload,
+        headers=headers,
+        timeout=30
+                            )
         resp.raise_for_status()  # Raise error if response not successful
         audio_data = resp.content  # Get audio binary data
         audio_base64 = base64.b64encode(audio_data).decode("utf-8")  # Convert to base64 for frontend
@@ -99,6 +111,10 @@ def index():
         try:
             # Get question and target language from form data
             question = request.form.get("question", "").strip()
+            if len(question) > 1000:
+                return jsonify({
+                    "error": "Question too long. Maximum 1000 characters."
+                })
             target_language = request.form.get("language", "en")
 
             # Check if question is empty
@@ -121,9 +137,10 @@ def index():
             # Generate content using Gemini
             response = model.generate_content(prompt)
 
-            # Check if response is empty
-            if not response.text:
-                raise ValueError("Empty response from AI")
+            answer = getattr(response, "text", "")
+
+            if not answer:
+                raise ValueError("No response generated")
 
             # Clean and strip unnecessary parts
             answer = clean_response(response.text.strip())
@@ -154,4 +171,4 @@ def index():
 
 # Run the Flask application
 if __name__ == "__main__":
-    app.run(debug=True, threaded=True)  # threaded=True allows handling multiple users
+    app.run(debug=False) # threaded=True allows handling multiple users
